@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# latex-render -- see SKILL.md
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_bootstrap.sh"
+latex_skill_main latex_automation "render" "$@"

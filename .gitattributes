@@ -1,0 +1,6 @@
+# Shell wrappers and test scripts must stay LF on every platform.
+# A CRLF checkout silently breaks `$?` capture and command continuation in bash.
+*.sh   text eol=lf
+bin/*  text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf

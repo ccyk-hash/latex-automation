@@ -1,0 +1,10 @@
+\documentclass{article}
+\usepackage{tikz}
+\begin{document}
+\begin{tikzpicture}
+\draw[thick,->] (0,0) -- (4,0) node[right]{$x$};
+\draw[thick,->] (0,0) -- (0,3) node[above]{$y$};
+\draw[blue,domain=0:3.5,smooth,variable=\x] plot ({\x},{0.5*\x+0.5});
+\node at (2,2.4) {中文标注};
+\end{tikzpicture}
+\end{document}
