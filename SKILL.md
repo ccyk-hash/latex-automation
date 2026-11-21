@@ -5,11 +5,11 @@ license: MIT
 compatibility: Windows（MSYS bash 调用），已在 TeX Live 2026 + Python 3.14 实测；Linux/macOS 上同样可用，只是路径与引擎探测分支不同。需要本机已装 TeX Live（含 latexmk、pdflatex、xelatex），可选 biber/bibtex/kpsewhich/pdftoppm/pdfinfo/chktex/latexindent。不联网、不自动安装任何 TeX 包。
 allowed-tools: Read Write Edit Bash Glob Grep
 metadata:
-  version: "0.3.0"
+  version: "0.4.0"
   last-reviewed: "2026-11-21"
   skill-author: built for DeepSeek Harness from the research in docs/01-research-report.md
   upstream: https://github.com/ccyk-hash/latex-automation
-  verified-on: "DSH bash + TeX Live 2026 (D:/Latex/texlive/2026) + Python 3.14.7 on Windows"
+  verified-on: "DSH bash + WorkBuddy PortableGit bash + TeX Live 2026 (D:/Latex/texlive/2026) + Python 3.14.7 / 3.13.14 on Windows"
 disable-model-invocation: false
 ---
 
@@ -23,7 +23,9 @@ disable-model-invocation: false
 约定 `SKILL_DIR` = 本 skill 根目录。三条等价入口，任选其一：
 
 ```bash
-SKILL_DIR="${DSH_SKILL_DIR:-$HOME/.dsh/skills/latex-automation}"
+# 本 skill 的根目录，选你实际装的那一处
+SKILL_DIR="${LATEX_SKILL_DIR:-$HOME/.dsh/skills/latex-automation}"   # DeepSeek Harness
+# SKILL_DIR="$HOME/.workbuddy/skills/latex-automation"               # WorkBuddy
 
 # 1) 包装脚本（推荐，自带 PYTHONPATH / UTF-8 / max_print_line 环境）
 bash "$SKILL_DIR/bin/latex-build" <项目目录>
@@ -35,8 +37,10 @@ PYTHONPATH="$SKILL_DIR" python -m latex_automation build <项目目录>
 latex-build <项目目录>
 ```
 
-包装脚本会自动挑一个**真能跑**的 Python（`python` → `python3` → `py`，逐个实跑验证，
-跳过 Microsoft Store 的 python3 存根）。需要指定解释器就设 `LATEX_SKILL_PYTHON`。
+包装脚本会自动挑一个**真能跑**的 Python（`python` → WorkBuddy 托管解释器 → `python3`
+→ `py`，逐个实跑验证，跳过 Microsoft Store 的 python3 存根）。需要指定解释器就设
+`LATEX_SKILL_PYTHON`。Windows 上 `bin/*.sh` 用 Git Bash / MSYS bash 执行即可
+（WorkBuddy 自带 PortableGit，DSH 自带 bash）。
 
 ## 子命令一览
 

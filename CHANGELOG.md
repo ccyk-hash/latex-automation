@@ -3,6 +3,45 @@
 版本号遵循 `MAJOR.MINOR.PATCH`：`MAJOR` 破坏 `build-report.json` 契约，
 `MINOR` 新增子命令或新增可选字段，`PATCH` 只修 bug。
 
+## v0.4.0 — 2026-11-21
+
+第二个交付物：WorkBuddy 版。不是复制一份代码，而是**同一份代码换 SKILL.md 头部**。
+`build-report.json` 契约不变。
+
+### 新增
+
+- **`tools/install_workbuddy.py`** —— 把技能装进 `~/.workbuddy/skills/latex-automation`。
+  WorkBuddy 的 `SKILL.md` 由 `workbuddy/frontmatter.yaml` + DSH `SKILL.md` 的正文
+  **现场拼出来**，所以仓库里只有一份正文，不存在两边改漂移的可能。
+  `--dry-run` 列清单、`--check` 逐文件 sha256 比对、`--force` 覆盖。
+  默认排除 `research/`（3 MB 夹具，运行时不读）。
+- **`tools/verify_workbuddy.py`** —— 验的是**装出来的副本**，不是仓库：装到临时目录后
+  用 **WorkBuddy 自带的 PortableGit bash** 驱动一个真实项目（doctor → init → build →
+  layout → repair → render → check），15 项。
+- **`tests/test_workbuddy.py`** —— 16 个契约单测。核心两条：
+  `test_body_is_reused_verbatim` 断言合成的 `SKILL.md` **以原始正文结尾**；
+  `test_every_subcommand_is_documented` 从 `cli.build_parser()` 取真实子命令集合，
+  要求每个名字都出现在正文里——加子命令忘了写文档会红。
+
+### 变更
+
+- **`bin/_bootstrap.sh`** 的解释器候选加入 WorkBuddy 托管解释器
+  （`~/.workbuddy/binaries/python/envs/default/Scripts/python.exe`），顺序为
+  `LATEX_SKILL_PYTHON` → `python` → 托管解释器 → `python3` → `py`。实测把 PATH 缩到
+  没有 `python` 时仍能跑起来。
+- **`SKILL.md` 正文改为宿主中立**：`SKILL_DIR` 处同时给出 DSH 与 WorkBuddy 两种默认
+  位置，用 `LATEX_SKILL_DIR` 覆盖；说明文字不再假定只有一种 bash。
+
+### 验证
+
+- 单测 **60/60**（新增双宿主契约 16 项）
+- 冒烟 **31/31**、P6 包验收 **31/31**、WorkBuddy 安装后 **15/15**（17.9 s）
+- WorkBuddy 侧端到端：`带 空格 目录` 建 `zh` 工程 → xelatex 1 页 → layout → render
+
+### 修正
+
+- `CHANGELOG` v0.3.0 条目里 P6 的项数从 25 改成 31（`--workspace` 才是 25，发布门槛是 31）。
+
 ## v0.3.0 — 2026-11-21
 
 P6 打包验证，以及验证过程中暴露出来的两个真问题。`build-report.json` 契约不变。
@@ -10,7 +49,7 @@ P6 打包验证，以及验证过程中暴露出来的两个真问题。`build-r
 ### 新增
 
 - **`tests/verify_p6.py`** —— P6 验收脚本，`git archive HEAD` 打包、解到含中文和空格的
-  目录、再从那里跑全部检查，共 25 项：
+  目录、再从那里跑全部检查，共 31 项：
   - 打包完整性：必需文件齐、11 个包装脚本在 index 里是 `100755`、无 CRLF、
     无 token 与绝对用户路径泄漏、`doctor` 能从解包目录跑、包装脚本能从无关 cwd 跑。
   - 六个代表用例：hello / zh / bib / tikz / big / broken，逐例记耗时、页数、

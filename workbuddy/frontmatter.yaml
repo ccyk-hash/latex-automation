@@ -1,0 +1,10 @@
+---
+name: latex-automation
+description: 在本机 TeX Live 上自动化 LaTeX 任务：编译出 PDF、把 .log 变成带因果排序的结构化诊断、缺包缺字体给出离线安装命令、有界修复闭环自动试改、版面量化（溢出/空洞/孤行）与渲染页面做视觉检查、chktex 静态检查与 latexindent 格式化、从模板新建工程。触发词：LaTeX、latex、TeX、XeLaTeX、pdflatex、lualatex、编译 PDF、论文编译、排版、ctex、中文 LaTeX、latexmk、biber、bibtex、参考文献、.tex、.log、编译报错、overfull、underfull、缺包、缺字体、修复编译错误、自动修 LaTeX、版面检查、孤行、寡行、空洞、模板、latexindent、chktex、渲染页面、LaTeX 自动化。
+version: 0.4.0
+allowed-tools: Read,Write,Edit,Bash,Glob,Grep
+metadata:
+  agent_created: true
+  compatibility: Windows（Git Bash / MSYS bash 调用），已在 TeX Live 2026 + WorkBuddy 托管 Python 3.13 实测；Linux/macOS 同样可用，只是路径与引擎探测分支不同。需要本机已装 TeX Live（含 latexmk、pdflatex、xelatex），可选 biber/bibtex/kpsewhich/pdftoppm/pdfinfo/chktex/latexindent。不联网、不自动安装任何 TeX 包。
+  upstream: https://github.com/ccyk-hash/latex-automation
+---

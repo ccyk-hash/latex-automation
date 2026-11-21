@@ -44,9 +44,15 @@ if [ -n "$PYTHON_BIN" ] && ! _python_works "$PYTHON_BIN"; then
   exit 127
 fi
 
+# WorkBuddy ships a managed interpreter that is guaranteed to exist there while
+# the system `python` may not; try it before falling back to PATH names.
+WORKBUDDY_PYTHON="${WORKBUDDY_PYTHON:-$HOME/.workbuddy/binaries/python/envs/default/Scripts/python.exe}"
+
 if [ -z "$PYTHON_BIN" ]; then
-  for candidate in python python3 py; do
-    if command -v "$candidate" >/dev/null 2>&1 && _python_works "$candidate"; then
+  # `_python_works` runs the candidate, so it doubles as the existence test and
+  # as the "does it actually execute" test.
+  for candidate in python "$WORKBUDDY_PYTHON" python3 py; do
+    if _python_works "$candidate"; then
       PYTHON_BIN="$candidate"
       break
     fi
