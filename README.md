@@ -111,10 +111,19 @@ DSH 启动时扫描 `~/.dsh/skills/*/SKILL.md`，读 frontmatter 的 `name` 与
 - `python -m unittest discover -s tests` → **10/10 通过**
 - `bash tests/smoke.sh` → **21/21 通过**，含 5 个模板真编译、2 个 putenv 回归、
   2 个失败文档的因果归并、渲染/检查/清理、报告 schema 契约
-- `doctor` → `environment ready: 13 ok, 0 warn, 0 fail`
+- `doctor` → 在含主文档的项目里 `13 ok, 0 warn, 0 fail`；在空目录里多一条
+  `[warn] project: no master .tex`（预期行为，不是失败）
+- 从 GitHub 下载的 tarball 解压到任意目录、在**非仓库根**的 cwd 下都能直接跑通
+  两套测试 —— 这一条专门验证 `bin/_bootstrap.sh` 的路径解析（见下）
 
-改任何东西之后这两个套件都必须仍然全绿。`tests/smoke.sh` 必须保持 **LF 行尾** ——
-用 CRLF 存会让 Bash 把 `$?` 读成 `"0\r"`，判定全错（这个坑踩过一次）。
+改任何东西之后这两个套件都必须仍然全绿。两条容易踩的坑：
+
+1. **`tests/smoke.sh` 必须保持 LF 行尾** —— 用 CRLF 存会让 Bash 把 `$?` 读成
+   `"0\r"`，判定全错（踩过一次）。
+2. **POSIX 路径不能直接进 `PYTHONPATH`** —— 本机 bash 不支持 `pwd -W`（那是 MSYS
+   扩展），必须用 `cygpath -w` 转成 `D:\...` 形式，否则 `python.exe` 找不到包，
+   而症状是「在仓库根能跑、换个 cwd 就 `No module named latex_automation`」
+   （也踩过一次）。
 
 ## 已知边界
 
