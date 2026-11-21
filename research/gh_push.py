@@ -44,11 +44,25 @@ def call(method: str, path: str, payload=None):
         return exc.code, {"raw": body}
 
 
-def tracked_files() -> list[str]:
+def tracked_files() -> list[tuple[str, str]]:
+    """Return (path, git_mode) pairs read from the index.
+
+    The filesystem mode cannot be trusted on Windows: `os.stat` reports no
+    executable bits there, so every wrapper would be pushed as 100644 and a
+    fresh clone could not run `bin/latex-*`. The index already carries the
+    intended mode after `git update-index --chmod=+x`.
+    """
     out = subprocess.run(
-        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
+        ["git", "ls-files", "-s"], cwd=ROOT, capture_output=True, text=True, check=True
     ).stdout
-    return [line for line in out.splitlines() if line.strip()]
+    files = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        meta, rel = line.split("\t", 1)
+        mode = meta.split()[0]
+        files.append((rel, mode))
+    return files
 
 
 def bootstrap_empty_repo() -> bool:
@@ -71,7 +85,7 @@ def main() -> int:
     print(f"tracked files: {len(files)}")
 
     entries = []
-    for rel in files:
+    for rel, mode in files:
         path = ROOT / rel
         raw = path.read_bytes()
         status, blob = call(
@@ -91,8 +105,6 @@ def main() -> int:
         if status not in (200, 201):
             print(f"blob FAILED {rel}: {status} {blob}", file=sys.stderr)
             return 1
-        executable = bool(os.stat(path).st_mode & 0o111)
-        mode = "100755" if executable else "100644"
         entries.append({"path": rel, "mode": mode, "type": "blob", "sha": blob["sha"]})
         print(f"  blob {blob['sha'][:10]}  {mode}  {rel}")
 
