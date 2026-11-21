@@ -226,6 +226,8 @@ def _classify(message: str) -> tuple[str, str]:
         return "encoding", ""
     if "capacity exceeded" in lower:
         return "capacity", ""
+    if "can be used only in preamble" in lower or "can only be used in preamble" in lower:
+        return "preamble_placement", ""
     if "there's no line here to end" in lower:
         return "layout_command", ""
     if "package" in lower and "error" in lower:
@@ -249,6 +251,7 @@ def _rank_key(diag: Diagnostic) -> tuple:
         "math_or_brace": 3,
         "encoding": 4,
         "package_error": 5,
+        "preamble_placement": 5,
         "generic": 6,
     }.get(diag.category, 6)
     in_source = 0 if diag.file.endswith(".tex") else 1

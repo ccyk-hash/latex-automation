@@ -3,6 +3,55 @@
 版本号遵循 `MAJOR.MINOR.PATCH`：`MAJOR` 破坏 `build-report.json` 契约，
 `MINOR` 新增子命令或新增可选字段，`PATCH` 只修 bug。
 
+## v0.2.0 — 2026-11-21
+
+补上调研计划里的 P4（诊断闭环）与 P5（版面视觉量化）。`build-report.json` 契约不变。
+
+### 新增子命令
+
+- **`repair [dir]`** —— 有界修复闭环。每轮编译一次、只出一条建议、只改一处，
+  最多 `--max-rounds`（默认 3）轮，每轮写 `latex-out/round-N.diag.json`。
+  建议类型：`switch-engine`（换引擎，不需授权）、`edit`（单行源码改名/补 `$`）、
+  `move-to-preamble`（把误放的 `\usepackage` 搬回导言区）、`install`（给
+  `tlmgr install` 命令但不执行）、`manual`（需要人或需要联网，立即停手）。
+  六种 `status`：`already-ok` / `repaired` / `needs-apply` / `needs-human` /
+  `failed` / `exhausted`。
+- **`layout [dir]`** —— 版面量化。走 `pdftotext -bbox-layout` 取每行坐标，报
+  `overflow-edge`（越过纸边，`error`）、`overflow-margin`（越过版心，`layout`）、
+  `hole`（行距 > 4× 正常，`layout`）、`widow-orphan`（孤行/寡行，`warning`）。
+  默认并读同名 `.log`，把 `Overfull \hbox` 并进 `log_overfull` 以覆盖几何看不见的
+  盒子。退出码按严重度而非置信度。
+
+### 关键设计（每条都有实测依据）
+
+- **修复只改 UTF-8 文件** —— 把 CP936 文件按 UTF-8 写回会静默毁掉它，比不修更糟；
+  这类文件直接判 `needs-human`。
+- **`--apply` 先备份再改**，备份在 `latex-out/repair/round-N/`。备份目录用绝对路径：
+  `--outdir` 相对项目根，`mkdir` 却相对进程 cwd，早期版本会把备份写到错误位置。
+- **行距取 20% 分位数而非中位数** —— 短页上一个 430pt 的浮动体空洞会把中位数拽走，
+  检测失效（实测 3.9× 漏报）；改分位数后 18.1× 正确报出。
+- **版心右边界取「至少两行印证的最右聚类」** —— 单行不能自证；取最频繁聚类会被表格
+  列边（成员更多）骗到，取中位数会被越界行自己拽走。同一份 zh 示例早期误报 3 条
+  `overflow-margin`，改后 0 条。
+- **孤行按缩进判，不按短行判** —— 段落末行本来就是短的。早期版本给 9 页文档报 16 条
+  假孤行，改后 4 条；而真实「段首孤悬页底」的 8 页文档报 7 条，全部命中。
+- **空洞阈值 4×** —— 标题前 2.5–3× 的间距是正常排版，2.5× 阈值会报 15 条假空洞。
+- **`summary()` 不会把「测不了」藏起来** —— 版心无法确定时明说
+  `right margin not measurable: too few full lines`，并退回只看日志 overfull。
+
+### 验证
+
+- 单测 **28/28**（`test_logparse.py` 10 + 新增 `test_layout.py` 18，后者用手造 box 数据
+  绕开真实 `pdftotext`，一个用例只考一个判据）。
+- 冒烟 **31/31**，新增 8 例：修复闭环 5（干净文档 `already-ok`、`\usepackage` 错位
+  自动搬回并保持行序、备份落盘、`round-1.diag.json` 存在、需人工时非零退出）、
+  版面量化 4（合规文档 rc=0、overfull rc=1、`--report` JSON 契约）。
+
+### 修正
+
+- `repair` 的备份目录改为绝对路径解析（相对 `--outdir` 会落到调用者 cwd）。
+- `_split_furniture` 不再把「只剩一行正文」的页面吸成页眉：那更可能是真实空洞。
+
 ## v0.1.0 — 2026-11-21
 
 首个可交付版本。DeepSeek Harness 技能形态，本机 TeX Live 实测通过。

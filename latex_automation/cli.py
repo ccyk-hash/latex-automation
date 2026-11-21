@@ -28,10 +28,17 @@ from .engine import (
     write_report,
 )
 from .lint import format_file, lint_file
-from .logparse import attribute_missing_locations, compress_log, parse_log_text
+from .logparse import (
+    attribute_missing_locations,
+    compress_log,
+    parse_engine_log,
+    parse_log_text,
+)
+from .layout import attach_log_overfull, measure_layout, page_verdicts
 from .packages import resolve_many
 from .paths import read_text, relative_outdir
 from .render import read_pdfinfo, render_pdf
+from .repair import repair_project, render_rounds
 from .scaffold import create_project, list_templates
 
 
@@ -131,6 +138,76 @@ def cmd_build(args: argparse.Namespace) -> int:
     return 0 if report.status == "success" else 1
 
 
+def cmd_repair(args: argparse.Namespace) -> int:
+    root = Path(args.project).resolve()
+    source = _resolve_master(root, args.file)
+
+    engine = args.engine
+    engine_reason = "explicit --engine"
+    if engine == "auto":
+        engine, engine_reason = detect_engine(source)
+
+    backend = args.backend
+    if backend == "auto":
+        backend = detect_backend(source)
+    elif backend == "none":
+        backend = None
+
+    outdir = Path(args.outdir)
+    options = BuildOptions(
+        source=source,
+        outdir=outdir,
+        engine=engine,
+        backend=backend,
+        use_latexmk=not args.no_latexmk,
+        jobname=args.jobname,
+        timeout=args.timeout,
+        stop_on_first_error=False,
+        shell_escape=args.shell_escape,
+        synctex=args.synctex,
+        project_root=root,
+    )
+
+    verdict = repair_project(
+        options,
+        max_rounds=args.max_rounds,
+        apply_edits=args.apply,
+        # Absolute: the repair module writes backups before the build has had a
+        # chance to resolve the outdir, so a relative path would land under the
+        # caller's cwd instead of next to the build artifacts.
+        backup_dir=(root / outdir / "repair") if args.apply else None,
+    )
+
+    # Every round leaves its own diagnostics file so a caller can diff rounds.
+    diag_paths: list[str] = []
+    base = Path(verdict.final.outdir) if verdict.final and verdict.final.outdir else (root / args.outdir)
+    for entry in verdict.rounds:
+        path = base / f"round-{entry.index}.diag.json"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(entry.as_dict(), indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            diag_paths.append(str(path))
+        except OSError:
+            pass
+
+    if args.report and verdict.final is not None:
+        write_report(verdict.final, Path(args.report))
+
+    if args.json:
+        payload = verdict.as_dict()
+        payload["diagnostic_files"] = diag_paths
+        payload["engine_reason"] = engine_reason
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        print(render_rounds(verdict))
+        for path in diag_paths:
+            print(f"diag: {path}")
+    return 0 if verdict.status in ("already-ok", "repaired") else 1
+
+
 def cmd_logs(args: argparse.Namespace) -> int:
     root = Path(args.project).resolve()
     log_path = Path(args.log) if args.log else None
@@ -197,6 +274,66 @@ def cmd_clean(args: argparse.Namespace) -> int:
         for name in removed[:20]:
             print(f"  - {name}")
     return 0
+
+
+def cmd_layout(args: argparse.Namespace) -> int:
+    root = Path(args.project).resolve()
+    if args.pdf:
+        pdf = Path(args.pdf)
+        if not pdf.is_absolute():
+            pdf = root / pdf
+        log_path = None
+    else:
+        outdir, _ = relative_outdir(root, Path(args.outdir))
+        stem = args.jobname or _resolve_master(root, args.file).stem
+        pdf = outdir / f"{stem}.pdf"
+        log_path = outdir / f"{stem}.log"
+
+    layout = measure_layout(pdf)
+
+    # The log's overfull boxes catch what geometry cannot: a short page has no
+    # measure to compare against, so a box wider than the text block but still
+    # on the paper would otherwise pass unnoticed.
+    if not layout.error and not args.no_log and log_path and log_path.is_file():
+        try:
+            text = read_text(log_path)
+            report = parse_engine_log(text, root, "engine")
+            attach_log_overfull(layout, report)
+        except OSError:
+            pass
+
+    if not layout.error and args.only:
+        wanted = {int(value) for value in args.only if value.isdigit()}
+        layout.pages = [page for page in layout.pages if page.index in wanted]
+        layout.issues = [issue for issue in layout.issues if issue.page in wanted]
+
+    if args.report:
+        report_path = Path(args.report)
+        if not report_path.is_absolute():
+            report_path = root / report_path
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps(layout.as_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+    if args.json:
+        print(json.dumps(layout.as_dict(), indent=2, ensure_ascii=False))
+    else:
+        print(layout.summary())
+        if layout.error:
+            return 1
+        for line in page_verdicts(layout):
+            print(line)
+        for entry in layout.log_overfull[:5]:
+            where = f"{entry['file']}:{entry['line']}" if entry["line"] else entry["file"]
+            print(f"  ! [log] {where}: {entry['detail']}")
+        if args.report:
+            print(f"report: {report_path}")
+    # Severity, not confidence, decides the exit code: a hole is a real layout
+    # defect even though the heuristic that found it is only 80% sure, while a
+    # suspected widow is a style hint a caller may legitimately ignore.
+    hard = any(issue.severity in ("error", "layout") for issue in layout.issues)
+    return 1 if layout.error or hard or layout.log_overfull else 0
 
 
 def cmd_render(args: argparse.Namespace) -> int:
@@ -326,6 +463,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_build)
 
+    # repair
+    p = sub.add_parser(
+        "repair",
+        help="compile, diagnose, propose a minimal fix, and recompile (bounded)",
+    )
+    p.add_argument("project", nargs="?", default=".")
+    p.add_argument("--file", help="master .tex (default: auto-detect)")
+    p.add_argument("--engine", default="auto", choices=("auto",) + ENGINES)
+    p.add_argument("--backend", default="auto", choices=("auto", "none") + BACKENDS)
+    p.add_argument("--outdir", default="latex-out")
+    p.add_argument("--jobname")
+    p.add_argument("--timeout", type=float, default=300.0)
+    p.add_argument("--no-latexmk", action="store_true")
+    p.add_argument("--shell-escape", action="store_true")
+    p.add_argument("--synctex", action="store_true")
+    p.add_argument(
+        "--max-rounds", type=int, default=3, help="upper bound on compile rounds (default 3)"
+    )
+    p.add_argument(
+        "--apply",
+        action="store_true",
+        help="write the proposed source edit (a backup is kept under <outdir>/repair/)",
+    )
+    p.add_argument("--report")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_repair)
+
     # logs
     p = sub.add_parser("logs", help="parse a LaTeX log into structured diagnostics")
     p.add_argument("project", nargs="?", default=".")
@@ -359,6 +523,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--jpeg", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_render)
+
+    # layout
+    p = sub.add_parser(
+        "layout",
+        help="measure page geometry: overflow past the margin or paper, holes, widows",
+    )
+    p.add_argument("project", nargs="?", default=".")
+    p.add_argument("--pdf", help="explicit PDF path")
+    p.add_argument("--outdir", default="latex-out")
+    p.add_argument("--file")
+    p.add_argument("--jobname")
+    p.add_argument("--only", nargs="*", help="restrict to these page numbers")
+    p.add_argument(
+        "--no-log",
+        action="store_true",
+        help="skip the .log, so only geometry is reported",
+    )
+    p.add_argument("--report", help="write the measurements to this JSON file")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_layout)
 
     # check
     p = sub.add_parser("check", help="static style check with chktex")

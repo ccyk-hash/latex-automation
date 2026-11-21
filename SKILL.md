@@ -1,11 +1,11 @@
 ---
 name: latex-automation
-description: 在本机 TeX Live 上自动化 LaTeX 任务：编译出 PDF、把 .log 变成带因果排序的结构化诊断、缺包缺字体给出离线安装命令、渲染页面做版面视觉检查、chktex 静态检查与 latexindent 格式化、从模板新建工程。触发词：LaTeX、latex、TeX、XeLaTeX、pdflatex、lualatex、编译 PDF、论文编译、排版、ctex、中文 LaTeX、latexmk、biber、bibtex、参考文献、.tex、.log、编译报错、overfull、缺包、缺字体、模板、latexindent、chktex、渲染页面、LaTeX 自动化。
+description: 在本机 TeX Live 上自动化 LaTeX 任务：编译出 PDF、把 .log 变成带因果排序的结构化诊断、缺包缺字体给出离线安装命令、有界修复闭环自动试改、版面量化（溢出/空洞/孤行）与渲染页面做视觉检查、chktex 静态检查与 latexindent 格式化、从模板新建工程。触发词：LaTeX、latex、TeX、XeLaTeX、pdflatex、lualatex、编译 PDF、论文编译、排版、ctex、中文 LaTeX、latexmk、biber、bibtex、参考文献、.tex、.log、编译报错、overfull、underfull、缺包、缺字体、修复编译错误、自动修 LaTeX、版面检查、孤行、寡行、空洞、模板、latexindent、chktex、渲染页面、LaTeX 自动化。
 license: MIT
 compatibility: Windows（MSYS bash 调用），已在 TeX Live 2026 + Python 3.14 实测；Linux/macOS 上同样可用，只是路径与引擎探测分支不同。需要本机已装 TeX Live（含 latexmk、pdflatex、xelatex），可选 biber/bibtex/kpsewhich/pdftoppm/pdfinfo/chktex/latexindent。不联网、不自动安装任何 TeX 包。
 allowed-tools: Read Write Edit Bash Glob Grep
 metadata:
-  version: "0.1.0"
+  version: "0.2.0"
   last-reviewed: "2026-11-21"
   skill-author: built for DeepSeek Harness from the research in docs/01-research-report.md
   upstream: https://github.com/ccyk-hash/latex-automation
@@ -47,6 +47,8 @@ latex-build <项目目录>
 | `logs [dir]` | 解析已有 `.log`（不重编） | 编译产物还在、只想看诊断 |
 | `clean [dir]` | 删中间产物，保留 PDF | 交付前瘦身、强制全量重编 |
 | `render [dir]` | PDF 页 → PNG/JPEG | 版面视觉检查、给模型看效果 |
+| `repair [dir]` | 有界修复闭环，每轮落 `round-N.diag.json` | 编不过、想让它自己试一轮 |
+| `layout [dir]` | 版面量化：溢出/空洞/孤行，页码级结论 | 想知道版面哪里不对，而不只是"看着怪" |
 | `check [dir]` | chktex 静态检查 + latexindent | 语法风格、缩进规范 |
 | `init <target>` | 从模板新建工程 | 起新文档，别从空白开始 |
 | `templates` | 列出模板 | 不确定有哪些模板时 |
@@ -141,18 +143,6 @@ missing packages:
 - 用 pdflatex 编了含中文的文档 → 换 `--engine xelatex` + `ctex`/`xeCJK`；
 - 字体真有缺口 → 换字体或加 `\setCJKmainfont`。
 
-## 版面视觉检查
-
-```bash
-bash "$SKILL_DIR/bin/latex-render" proj --dpi 120             # 全部页
-bash "$SKILL_DIR/bin/latex-render" proj --first 1 --last 3     # 只看前 3 页
-bash "$SKILL_DIR/bin/latex-render" proj --jpeg                 # JPEG 更小
-```
-
-产物在 `latex-out/render/`。渲染完**用 Read 工具打开 PNG 自己看**：文字溢出页边、
-浮动体错位、图表压字、目录页空白这些 `overfull` 警告说不清的问题，只能看图判断。
-`log.layout` 里 `Overfull \hbox` 超过 5pt 的会被记为 `severity: layout` 并带行号，可以和图对上。
-
 ## 静态检查与格式化
 
 ```bash
@@ -174,20 +164,88 @@ bash "$SKILL_DIR/bin/latex-init" my-paper --template zh --title "论文标题" -
 模板：`article`(pdflatex) / `zh`(xelatex + ctexart) / `biblatex`(pdflatex + biber) /
 `beamer`(pdflatex) / `tikz`(lualatex)。生成后目录里有 `latex-project.json` 记着清单。
 
-## 有界修复闭环（这是本技能最该被用起来的地方）
+## 有界修复闭环
 
-文档编不过时，**不要盲改源码**。按这个循环走，最多 3 轮：
+文档编不过时，**不要盲改源码**。`repair` 把这件事变成一个有上限的循环：
 
-1. `latex-build proj` → 读 `root_cause`（file / line / category / message）。
-2. 只改 root_cause 指的那一处。别顺手改别的，别为了消错去开 `--shell-escape`。
-3. 重跑。若 root_cause 变成另一条，说明前一条确实是因、这条是新的因，继续。
-4. 3 轮还不过，或者撞到下面这些情况，就停下来报告，别硬试：
-   - `missing_package` 且本地 tlpdb 里查不到 → 需要用户装包，给命令即可；
-   - 需要新增字体/外部程序；
-   - 源码本身有问题（缺图、缺 `.bib` 条目、逻辑错误），不是编译参数能救的。
+```bash
+bash "$SKILL_DIR/bin/latex-repair" proj                  # 先看它想怎么修
+bash "$SKILL_DIR/bin/latex-repair" proj --apply          # 允许它改源码
+bash "$SKILL_DIR/bin/latex-repair" proj --apply --max-rounds 3 --json
+```
 
-每一轮都要把 `build-report.json` 留在原地 —— 它是「改了什么、为什么还不过」的证据，
-比对话里的复述可靠。
+语义要点：
+
+- **每轮只出一条建议、只改一处**。构建开关类建议（换引擎）不需要 `--apply`，
+  下一轮编译本身就能证明对错。
+- 不加 `--apply` 时只报告，`status` 为 `needs-apply`，源码一个字节都不动。
+- `--apply` 会**先备份再改**，备份在 `latex-out/repair/round-N/`。只改 UTF-8 文件——
+  把 CP936 文件按 UTF-8 写回会静默毁掉它，所以这类文件直接判 `needs-human`。
+- 每轮都会写 `latex-out/round-N.diag.json`，几轮之间可以 diff。
+
+`status` 的六种结果，各自该做什么：
+
+| status | 含义 | 下一步 |
+| --- | --- | --- |
+| `already-ok` | 一编就过 | 没你的事了 |
+| `repaired` | 改完过了 | 看一眼备份目录，确认改得对 |
+| `needs-apply` | 有建议但没授权改 | 加上 `--apply` 重跑 |
+| `needs-human` | 建议需要人做（装包、换字体、逻辑错） | 读 `stopped_reason`，照做 |
+| `failed` | 同一根因修了还在 | 停手，人工看源码 |
+| `exhausted` | 轮数用完还不过 | 提高 `--max-rounds` 或人工介入 |
+
+哪些情况它**不会**硬试（这是设计，不是缺陷）：缺包要联网装、需要加字体、缺图缺
+`.bib` 条目、源码逻辑错。这些停下来给结论比乱改更有用。
+
+不想用闭环、只想手动走一遍时：`latex-build proj` → 读 `root_cause`（file / line /
+category / message）→ 只改那一处 → 重跑。`--shell-escape` 永远不是消错手段。
+
+## 版面视觉检查
+
+两件事，用途不同：
+
+**看图**（人/模型的眼睛）：
+
+```bash
+bash "$SKILL_DIR/bin/latex-render" proj --dpi 120             # 全部页
+bash "$SKILL_DIR/bin/latex-render" proj --first 1 --last 3     # 只看前 3 页
+bash "$SKILL_DIR/bin/latex-render" proj --jpeg                 # JPEG 更小
+```
+
+产物在 `latex-out/render/`，用 Read 工具打开 PNG 自己看。文字溢出页边、浮动体错位、
+图表压字、目录页空白这些 `overfull` 说不清的问题，只能看图判断。
+
+**量化**（不必逐页看就能定位）：
+
+```bash
+bash "$SKILL_DIR/bin/latex-layout" proj
+bash "$SKILL_DIR/bin/latex-layout" proj --json --report latex-out/layout.json
+bash "$SKILL_DIR/bin/latex-layout" proj --only 2 3      # 只看第 2、3 页
+```
+
+它用 `pdftotext -bbox-layout` 拿每行坐标，报四类问题：
+
+| kind | 判据 | severity |
+| --- | --- | --- |
+| `overflow-edge` | 行尾超过**纸张**右边界 | `error`（确定） |
+| `overflow-margin` | 行尾超过**版心**右边界但仍在纸内 | `layout`（确定） |
+| `hole` | 相邻行间距 > 4× 正常行距 | `layout`（启发式，0.8） |
+| `widow-orphan` | 页首短行不缩进（寡行）/ 页末行缩进（孤行） | `warning`（启发式，0.7） |
+
+几个判据是**校准过的**，改之前先读代码注释：行距取 20% 分位数而非中位数（否则短
+页上的空洞会把"正常行距"拽过去）；版心右边界取"至少两行互相印证的最右聚类"（单行
+不能自证，越界行不能定义正常）；孤行按**缩进**判而非按短行判（段落末行本来就是短
+的，按短行判会给每个正常段落都报一次）；空洞阈值 4× 而非 2.5×（标题前的 2.5–3× 间距
+是正常排版）。
+
+**几何看不到的，日志补**：比版心宽、但还没冲出纸面的盒子，`pdftotext` 的坐标看不出
+异常，只有 `.log` 的 `Overfull \hbox` 知道。所以 `layout` 默认读同名 `.log` 并把它
+并进 `log_overfull`；测不出右边距时（短页、beamer 这类行数太少的文档）会在
+`measure_source` 标 `log`，并在摘要里明说"right margin not measurable"——这是诚实的
+测不了，不是漏报。
+
+退出码按**严重度**而非置信度：`error`/`layout` 类问题 rc=1，纯 `warning` 类 rc=0
+（可疑寡行只是样式提示，调用者可以合法忽略）。
 
 ## 必须知道的平台约束
 
@@ -241,6 +299,14 @@ Windows TeX Live 有一个确定性缺陷：**绝对路径** `-output-directory`
 }
 ```
 
+`repair` 与 `layout` 另有两类产物：
+
+- `latex-out/round-N.diag.json` —— 修复闭环每一轮的诊断快照（`status`/`root_cause`/
+  `suggestion`/`applied`/`note`），几轮之间可直接 diff；
+- `latex-out/repair/round-N/<file>` —— `--apply` 改动前的原文件备份；
+- `--report` 指定的 `layout.json` —— 版面量化的完整结果（`counts`/`issues`/`log_overfull`/
+  逐页 `lines`/`measure_pt`）。
+
 ## 出错时怎么办
 
 | 现象 | 处理 |
@@ -249,15 +315,16 @@ Windows TeX Live 有一个确定性缺陷：**绝对路径** `-output-directory`
 | `output directory ... is outside the project` | `--outdir` 改回项目内 |
 | `log not found` | 先 `build` 一次；或 `--log` 指到具体 `.log` |
 | `python3` 存在但包装脚本没输出 | 那是 Store 存根；设 `LATEX_SKILL_PYTHON=python` |
+| `layout` 说 `right margin not measurable` | 行数太少无法定版心（beamer、单行页）；这是诚实结论，此时看 `log_overfull` |
 | 编译成功但 PDF 是旧的 | 看 `report` 里的 `pdf_sha256`；不确定就 `clean --drop-pdf` 后重编 |
 | 中文全是空白/方框 | 引擎选错，`--engine xelatex`；看 `log.missing_chars` 确认字体 |
 
 ## 自检
 
 ```bash
-bash "$SKILL_DIR/tests/smoke.sh"          # 21 个端到端用例，约 40 秒
-python -m unittest discover -s "$SKILL_DIR/tests"   # 日志解析单测
+bash "$SKILL_DIR/tests/smoke.sh"          # 31 个端到端用例，约 60 秒
+python -m unittest discover -s "$SKILL_DIR/tests"   # 46 个单测（日志解析 + 版面量化）
 ```
 
 冒烟套件里有两个**故意难看的目录名**（`带 空格 目录`、`中 文`）——它们就是 putenv 回归，
-任何改动后都必须仍然 21/21。
+任何改动后都必须仍然全绿。

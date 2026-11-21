@@ -70,7 +70,7 @@ latex-automation/
 ├── README.md               # 本文件
 ├── CHANGELOG.md                # 版本记录
 ├── LICENSE                     # MIT
-├── bin/                        # 8 个 bash 包装 + _bootstrap.sh
+├── bin/                        # 10 个 bash 包装 + _bootstrap.sh
 ├── latex_automation/           # Python 包
 │   ├── proc.py                 # 子进程、解码链、runscript 噪音过滤、进程树杀掉
 │   ├── paths.py                # 相对 outdir 计算、CJK 检测、项目文件遍历
@@ -81,10 +81,13 @@ latex-automation/
 │   ├── render.py               # PDF → PNG/JPEG
 │   ├── lint.py                 # chktex + latexindent
 │   ├── scaffold.py             # 5 个模板
+│   ├── repair.py               # 有界修复闭环：建议 → 应用 → 复编
+│   ├── layout.py               # 版面量化：溢出/空洞/孤行（pdftotext -bbox-layout）
 │   └── cli.py                  # argparse 子命令
 ├── tests/
 │   ├── test_logparse.py        # 10 个日志解析单测（fixtures 是真实日志裁剪）
-│   └── smoke.sh                # 21 个端到端用例
+│   ├── test_layout.py          # 18 个版面量化单测（手造 box 数据）
+│   └── smoke.sh                # 31 个端到端用例
 ├── fixtures/                   # broken.tex / misspkg.tex
 ├── research/                   # 调研脚本与 L4 实测夹具（非运行依赖）
 └── docs/
@@ -108,9 +111,11 @@ DSH 启动时扫描 `~/.dsh/skills/*/SKILL.md`，读 frontmatter 的 `name` 与
 
 在 TeX Live 2026 + Python 3.14.7 + Windows 上实测：
 
-- `python -m unittest discover -s tests` → **10/10 通过**
-- `bash tests/smoke.sh` → **21/21 通过**，含 5 个模板真编译、2 个 putenv 回归、
-  2 个失败文档的因果归并、渲染/检查/清理、报告 schema 契约
+- `python -m unittest discover -s tests` → **28/28 通过**（日志解析 10 + 版面量化 18）
+- `bash tests/smoke.sh` → **31/31 通过**，含 5 个模板真编译、2 个 putenv 回归、
+  2 个失败文档的因果归并、渲染/检查/清理、**修复闭环 5 例**（干净文档直接收敛、
+  `\usepackage` 错位自动搬回、备份与 `round-N.diag.json` 落盘、需人工时正确停手）、
+  **版面量化 4 例**（合规文档静默、overfull 报警、JSON 报告契约）、报告 schema 契约
 - `doctor` → 在含主文档的项目里 `13 ok, 0 warn, 0 fail`；在空目录里多一条
   `[warn] project: no master .tex`（预期行为，不是失败）
 - 从 GitHub 下载的 tarball 解压到任意目录、在**非仓库根**的 cwd 下都能直接跑通
@@ -128,7 +133,9 @@ DSH 启动时扫描 `~/.dsh/skills/*/SKILL.md`，读 frontmatter 的 `name` 与
 ## 已知边界
 
 - 不解析 `.dtx`、不做 `\write18` 沙箱、不做 SyncTeX 双向跳转（`--synctex` 只负责生成）。
-- 版面检查是「渲染出来给模型看」，没有自动的视觉回归基线。
+- 版面量化只依赖 `pdftotext`，没有像素级比对（不做视觉回归基线）；行数太少的文档
+  无法确定版心，此时会明说 `right margin not measurable` 并退回只看日志 overfull。
+- 修复闭环每轮只出一种建议、只改一处，不做多缺陷联合规划；`--apply` 只改 UTF-8 文件。
 - 只认 TeX Live 的 `texlive.tlpdb`；MiKTeX 的包库结构不同，缺包提示会退化成
   「不属于任何已装包」。
 - 模板是 5 个最小可用骨架，不是期刊投稿模板库。
