@@ -14,6 +14,19 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# `pwd` here yields a POSIX path (/d/dsh/...) that a native python.exe cannot
+# resolve on PYTHONPATH. Convert it: cygpath is authoritative where it exists,
+# `pwd -W` covers MSYS bash, and a POSIX path means no conversion is needed.
+PACKAGE_ROOT_WIN="$(cygpath -w "$PACKAGE_ROOT" 2>/dev/null)"
+PATH_JOIN_SEP=';'
+if [ -z "$PACKAGE_ROOT_WIN" ]; then
+  PACKAGE_ROOT_WIN="$(cd "$PACKAGE_ROOT" && pwd -W 2>/dev/null)"
+fi
+if [ -z "$PACKAGE_ROOT_WIN" ]; then
+  PACKAGE_ROOT_WIN="$PACKAGE_ROOT"
+  PATH_JOIN_SEP=':'
+fi
+
 # TeX Live and this toolkit both print UTF-8; a CP936 console would mangle it.
 export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
 export PYTHONUTF8="${PYTHONUTF8:-1}"
@@ -46,7 +59,7 @@ if [ -z "$PYTHON_BIN" ]; then
   exit 127
 fi
 
-export PYTHONPATH="$PACKAGE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$PACKAGE_ROOT_WIN${PYTHONPATH:+$PATH_JOIN_SEP$PYTHONPATH}"
 
 latex_skill_main() {
   local module="$1"

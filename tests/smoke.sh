@@ -13,12 +13,12 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Windows Python does not understand MSYS paths such as /d/dsh/..., so anything
 # handed to PYTHONPATH has to be converted first.
-HERE_WIN="$(cd "$HERE" && pwd -W 2>/dev/null || true)"
+HERE_WIN="$(cygpath -w "$HERE" 2>/dev/null || true)"
 [ -n "$HERE_WIN" ] || HERE_WIN="$HERE"
 
 PY="${LATEX_SKILL_PYTHON:-python}"
 WORK="$HERE/.smoke"
-WORK_WIN="$(cd "$HERE" && pwd -W 2>/dev/null || true)"
+WORK_WIN="$(cygpath -w "$WORK" 2>/dev/null || true)"
 [ -n "$WORK_WIN" ] || WORK_WIN="$WORK"
 KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
