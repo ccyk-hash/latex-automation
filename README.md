@@ -85,14 +85,18 @@ latex-automation/
 │   ├── layout.py               # 版面量化：溢出/空洞/孤行（pdftotext -bbox-layout）
 │   └── cli.py                  # argparse 子命令
 ├── tests/
-│   ├── test_logparse.py        # 10 个日志解析单测（fixtures 是真实日志裁剪）
+│   ├── test_logparse.py        # 11 个日志解析单测（fixtures 是真实日志裁剪）
+│   ├── test_engine.py          # 15 个引擎探测单测（裸 CJK / 注释 / CJKutf8 / 非 UTF-8 预检）
 │   ├── test_layout.py          # 18 个版面量化单测（手造 box 数据）
+│   ├── verify_p6.py            # 31 项打包验收（跑 git archive 出来的包）
 │   └── smoke.sh                # 31 个端到端用例
 ├── fixtures/                   # broken.tex / misspkg.tex
 ├── research/                   # 调研脚本与 L4 实测夹具（非运行依赖）
 └── docs/
     ├── 00-research-plan.md     # 调研计划
-    └── 01-research-report.md   # 调研报告与评分表
+    ├── 01-research-report.md   # 调研报告与评分表
+    ├── 02-p6-verification.md   # P6 验收：为什么这样测、抓到什么缺陷
+    └── 03-p6-run.md            # P6 执行记录：逐项判定与本次指标
 ```
 
 ## 装到 DSH
@@ -111,7 +115,11 @@ DSH 启动时扫描 `~/.dsh/skills/*/SKILL.md`，读 frontmatter 的 `name` 与
 
 在 TeX Live 2026 + Python 3.14.7 + Windows 上实测：
 
-- `python -m unittest discover -s tests` → **28/28 通过**（日志解析 10 + 版面量化 18）
+- `python -m unittest discover -s tests` → **44/44 通过**（日志解析 11 + 引擎探测 15 + 版面量化 18）
+- `python tests/verify_p6.py` → **31/31 通过**（约 55–75 s），跑的是 `git archive HEAD`
+  打出来的包，解到 `包 目录/relocated`（中文 + 空格）再验：文件齐、11 个 `100755`、
+  无 CRLF、无 token 泄漏、六用例全对、7 种路径 + 3 种文件名通过、CP936 源报错且字节不变。
+  `--workspace` 模式少 6 项打包检查（25 项），只用于改代码时迭代，**不作为发布依据**
 - `bash tests/smoke.sh` → **31/31 通过**，含 5 个模板真编译、2 个 putenv 回归、
   2 个失败文档的因果归并、渲染/检查/清理、**修复闭环 5 例**（干净文档直接收敛、
   `\usepackage` 错位自动搬回、备份与 `round-N.diag.json` 落盘、需人工时正确停手）、
@@ -133,6 +141,9 @@ DSH 启动时扫描 `~/.dsh/skills/*/SKILL.md`，读 frontmatter 的 `name` 与
 ## 已知边界
 
 - 不解析 `.dtx`、不做 `\write18` 沙箱、不做 SyncTeX 双向跳转（`--synctex` 只负责生成）。
+- 非 UTF-8 检测只覆盖项目内的 `.tex`；`\input` 项目外的文件、或 `.sty` 里的非 UTF-8 内容
+  不在检查范围。检测按 UTF-8 严格解码，BOM 视为合法（`utf-8-sig` 能读）。
+- 引擎自动探测只看主文档；多主文档项目请显式传 `--file` 与 `--engine`。
 - 版面量化只依赖 `pdftotext`，没有像素级比对（不做视觉回归基线）；行数太少的文档
   无法确定版心，此时会明说 `right margin not measurable` 并退回只看日志 overfull。
 - 修复闭环每轮只出一种建议、只改一处，不做多缺陷联合规划；`--apply` 只改 UTF-8 文件。

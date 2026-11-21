@@ -171,6 +171,34 @@ class TestEngineLog(unittest.TestCase):
         self.assertLess(len(excerpt.splitlines()), len(SUCCESS_LOG.splitlines()))
 
 
+GBK_LOG = r"""
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2026)
+entering extended mode
+(./main.tex
+LaTeX2e <2025-11-01> patch level 1
+! LaTeX Error: Invalid UTF-8 byte sequence (\xd6\xd0).
+
+See the LaTeX manual or LaTeX Companion for explanation.
+Type  H <return>  for immediate help.
+ ...
+
+l.4 \xd6\xd0\xce\xc4
+
+)
+No pages of output.
+"""
+
+
+class TestEncoding(unittest.TestCase):
+    def test_gbk_bytes_are_an_encoding_fault(self):
+        # pdfTeX reports the offending bytes, not a character, so wording differs
+        # from the Unicode case; both are encoding, not generic.
+        report = parse_engine_log(GBK_LOG, ROOT, "engine")
+        self.assertFalse(report.success)
+        self.assertTrue(report.errors)
+        self.assertEqual(report.errors[0].category, "encoding")
+
+
 class TestBibLogs(unittest.TestCase):
     def test_biber_error(self):
         report = parse_biber_log(BIBER_LOG, ROOT)

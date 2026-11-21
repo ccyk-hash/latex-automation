@@ -222,7 +222,13 @@ def _classify(message: str) -> tuple[str, str]:
         return "unbalanced_argument", ""
     if "environment" in lower and "undefined" in lower:
         return "undefined_environment", ""
-    if "unicode character" in lower or "not set up for use with latex" in lower:
+    if (
+        "unicode character" in lower
+        or "not set up for use with latex" in lower
+        # A GBK/CP1251 source read as UTF-8 gets here first: pdfTeX reports the
+        # bytes, not a character, so the wording differs from the Unicode case.
+        or "invalid utf-8 byte sequence" in lower
+    ):
         return "encoding", ""
     if "capacity exceeded" in lower:
         return "capacity", ""

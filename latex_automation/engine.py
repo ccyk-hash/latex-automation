@@ -24,7 +24,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import packages
-from .logparse import LogReport, attribute_missing_locations, merge_reports, parse_log_text
+from .logparse import (
+    Diagnostic,
+    LogReport,
+    attribute_missing_locations,
+    merge_reports,
+    parse_log_text,
+)
 from .paths import (
     AUX_SUFFIXES,
     iter_project_files,
@@ -57,6 +63,41 @@ XELATEX_HINTS = re.compile(
     r"|\\setmainfont|\\setCJKmainfont|\\setCJKfamilyfont"
 )
 LUALATEX_HINTS = re.compile(r"\\directlua|\\usepackage\s*(?:\[[^\]]*\])?\{luacode\}|\\fontspec")
+# Raw CJK characters in the body are the single most common reason a document
+# that "looks plain" cannot be compiled by pdfTeX: it has no glyphs for them and
+# inputenc rejects the bytes. Two caveats shaped this rule. Text inside comments
+# never reaches pdfTeX, so CJK there must not change the engine; and the legacy
+# CJK/CJKutf8 packages are a deliberate pdfLaTeX setup, so honour them.
+CJK_TEXT = re.compile(
+    r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff01-\uff60]"
+)
+LEGACY_CJK_PKG = re.compile(r"\\usepackage\s*(?:\[[^\]]*\])?\{CJK(?:utf8|fnt|ec)?\}")
+
+
+def strip_comments(text: str) -> str:
+    """Drop ``%`` comments so declarations are read, not prose.
+
+    An escaped ``\\%`` is part of the text, and ``\\%`` at the start of a line
+    still comments the rest of it, so the backslash count decides.
+    """
+    kept = []
+    for line in text.splitlines():
+        cut = len(line)
+        index = line.find("%")
+        while index != -1:
+            backslashes = 0
+            cursor = index - 1
+            while cursor >= 0 and line[cursor] == "\\":
+                backslashes += 1
+                cursor -= 1
+            if backslashes % 2 == 0:
+                cut = index
+                break
+            index = line.find("%", index + 1)
+        kept.append(line[:cut])
+    return "\n".join(kept)
+
+
 BIBLATEX_RE = re.compile(r"\\usepackage\s*(?:\[[^\]]*\])?\{biblatex\}")
 BIBTEX_RE = re.compile(r"\\bibliography\s*\{|\\bibliographystyle\s*\{")
 BIBER_BACKEND_RE = re.compile(r"\\usepackage\s*\[[^\]]*backend\s*=\s*biber[^\]]*\]\{biblatex\}")
@@ -149,6 +190,8 @@ def detect_engine(source: Path) -> tuple[str, str]:
         if LUALATEX_HINTS.search(text) and "\\directlua" in text:
             return "lualatex", "document uses \\directlua"
         return "xelatex", "document loads ctex/xeCJK/fontspec"
+    if CJK_TEXT.search(strip_comments(text)) and not LEGACY_CJK_PKG.search(text):
+        return "xelatex", "source contains CJK text and loads no CJK package"
     if "\\usepackage{lmodern}" in text or "\\usepackage[T1]{fontenc}" in text:
         return "pdflatex", "pdfTeX-compatible preamble"
     return "pdflatex", "default engine (no OpenType requirement detected)"
@@ -321,6 +364,38 @@ def _aux_fingerprint(outdir: Path, stem: str) -> str:
     return sha256_text("\n".join(parts))
 
 
+UNICODE_ENGINES = ("xelatex", "lualatex")
+
+
+def non_utf8_sources(root: Path, source: Path) -> list[str]:
+    """List project ``.tex`` files that are not valid UTF-8.
+
+    XeTeX and LuaTeX take their input as UTF-8 and will happily typeset the
+    mojibake that a GBK file turns into -- a PDF full of wrong glyphs is worse
+    than a failed build, because nothing looks broken. pdfTeX is left out on
+    purpose: ``\\usepackage[latin1]{inputenc}`` is a legitimate setup there.
+    """
+    offenders = []
+    seen = {source.resolve()}
+    candidates = [source] + [p for p in iter_project_files(root) if p.suffix == ".tex"]
+    for path in candidates:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        if resolved in seen and path is not source:
+            continue
+        seen.add(resolved)
+        try:
+            path.read_bytes().decode("utf-8")
+        except (UnicodeDecodeError, OSError):
+            try:
+                offenders.append(str(path.relative_to(root)).replace("\\", "/"))
+            except ValueError:
+                offenders.append(path.name)
+    return offenders
+
+
 def compile_project(options: BuildOptions) -> BuildReport:
     """Run one full build and return a report describing exactly what happened."""
     chain = discover_toolchain()
@@ -356,6 +431,30 @@ def compile_project(options: BuildOptions) -> BuildReport:
 
     outdir_abs.mkdir(parents=True, exist_ok=True)
     stem = options.jobname or source.stem
+
+    # Refuse to feed non-UTF-8 source to a Unicode engine: the build would
+    # "succeed" and produce a PDF of wrong glyphs, which is undetectable later.
+    if options.engine in UNICODE_ENGINES:
+        offenders = non_utf8_sources(root, source)
+        if offenders:
+            names = ", ".join(offenders[:3])
+            report.status = "failed"
+            report.failure = f"{names} is not valid UTF-8; {options.engine} reads source as UTF-8"
+            report.log = LogReport(success=False)
+            report.log.errors.append(
+                Diagnostic(
+                    severity="error",
+                    message=report.failure,
+                    file=offenders[0],
+                    line=None,
+                    tool=options.engine,
+                    category="encoding",
+                    detail="convert the file to UTF-8; the original encoding cannot be inferred",
+                )
+            )
+            report.log.root_cause = report.log.errors[0]
+            report.duration_ms = int((time.time() - started) * 1000)
+            return report
 
     steps: list[BuildStep] = []
     failure: str | None = None

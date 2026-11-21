@@ -116,9 +116,16 @@ def main() -> int:
         return 1
     print(f"tree: {tree['sha']}")
 
+    # GH_PARENT pins the parent explicitly, which is how a messy branch gets
+    # replaced by a single squashed commit; GH_FORCE then allows the ref update.
+    pinned = os.environ.get("GH_PARENT", "").strip()
+    force = os.environ.get("GH_FORCE", "").strip() in ("1", "true", "yes")
     status, ref = call("GET", f"/repos/{OWNER}/{REPO}/git/ref/heads/{BRANCH}")
     parents = []
-    if status == 200:
+    if pinned:
+        parents = [pinned]
+        print(f"parent: {pinned} (pinned by GH_PARENT)")
+    elif status == 200:
         parents = [ref["object"]["sha"]]
         print(f"parent: {parents[0]}")
     else:
@@ -138,7 +145,7 @@ def main() -> int:
         status, updated = call(
             "PATCH",
             f"/repos/{OWNER}/{REPO}/git/refs/heads/{BRANCH}",
-            {"sha": commit["sha"], "force": False},
+            {"sha": commit["sha"], "force": force},
         )
     else:
         status, updated = call(

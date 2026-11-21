@@ -110,6 +110,19 @@ def _source_line(path: Path, line: int | None) -> str:
     return ""
 
 
+def _is_utf8(path: Path) -> bool:
+    """True when the file decodes as UTF-8.
+
+    Deliberately strict: a source that only decodes because of ``surrogateescape``
+    or a lenient codec is still a file whose rewrite would destroy it.
+    """
+    try:
+        path.read_bytes().decode("utf-8")
+    except (UnicodeDecodeError, OSError):
+        return False
+    return True
+
+
 def project_macros(root: Path) -> dict[str, str]:
     """Map every macro/environment the project defines to the file defining it."""
     found: dict[str, str] = {}
@@ -345,6 +358,25 @@ def suggest(root: Path, report: LogReport, engine: str) -> Suggestion | None:
             )
 
     if cat == "encoding":
+        # Two different faults share this category and only one of them is an
+        # engine problem. If the file itself is not UTF-8, no engine will read it
+        # correctly, and switching to XeLaTeX only trades one error for another:
+        # convert the bytes first, and never do that automatically, because the
+        # original encoding cannot be inferred from a broken log line.
+        if source is not None and source.is_file() and not _is_utf8(source):
+            name = diag.file or source.name
+            return Suggestion(
+                category=cat,
+                kind="manual",
+                summary=f"{name} is not UTF-8 encoded",
+                detail=(
+                    f"convert it, then rebuild: iconv -f gb18030 -t utf-8 '{name}' "
+                    f"> '{name}.utf8' && mv '{name}.utf8' '{name}'"
+                ),
+                file=diag.file,
+                line=diag.line,
+                confidence=0.9,
+            )
         if engine == "pdflatex":
             return Suggestion(
                 category=cat,

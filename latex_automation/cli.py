@@ -398,6 +398,17 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 def cmd_init(args: argparse.Namespace) -> int:
     target = Path(args.target).resolve()
+    # `latex-init zh` reads like "scaffold the zh template", but the positional
+    # argument is the destination and the template defaults to article. Say so
+    # instead of quietly building the wrong project in a directory called "zh".
+    known = {item["name"] for item in list_templates()}
+    if args.template == "article" and target.name in known and not target.exists():
+        print(
+            f"note: '{target.name}' is also a template name; "
+            f"this creates an article project in ./{target.name}. "
+            f"Use `--template {target.name}` for that template.",
+            file=sys.stderr,
+        )
     manifest = create_project(
         target,
         template=args.template,

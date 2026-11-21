@@ -3,6 +3,48 @@
 版本号遵循 `MAJOR.MINOR.PATCH`：`MAJOR` 破坏 `build-report.json` 契约，
 `MINOR` 新增子命令或新增可选字段，`PATCH` 只修 bug。
 
+## v0.3.0 — 2026-11-21
+
+P6 打包验证，以及验证过程中暴露出来的两个真问题。`build-report.json` 契约不变。
+
+### 新增
+
+- **`tests/verify_p6.py`** —— P6 验收脚本，`git archive HEAD` 打包、解到含中文和空格的
+  目录、再从那里跑全部检查，共 25 项：
+  - 打包完整性：必需文件齐、11 个包装脚本在 index 里是 `100755`、无 CRLF、
+    无 token 与绝对用户路径泄漏、`doctor` 能从解包目录跑、包装脚本能从无关 cwd 跑。
+  - 六个代表用例：hello / zh / bib / tikz / big / broken，逐例记耗时、页数、
+    log 压缩比。
+  - Windows 路径：`plain` / `with space` / `中文` / `中 文` / `带 空格 目录` / `a b c` /
+    六级深嵌套，以及三个特殊文件名（`my paper.tex`、`我的 论文.tex`、`résumé.tex`）。
+  - CP936 源：必须**报错**而不是产出乱码 PDF，且 `repair` 不得改写文件字节。
+  `--workspace` 用工作区代替 tarball 迭代；发布门槛必须无参数跑。
+
+### 修正（都是 P6 跑出来的，不是设计出来的）
+
+- **引擎探测补上裸 CJK 文本**：`\documentclass{article}` + 正文里的中文，pdflatex 必失败
+  （`Unicode character 中 not set up for use with LaTeX`），而旧规则只看 ctex/xeCJK/fontspec，
+  于是判成 pdflatex。现在正文含 CJK 且**没有** `CJK/CJKutf8` 包时选 xelatex。
+  两个反例都处理了：注释里的中文不算（pdfTeX 根本不读注释），`CJKutf8` 是刻意的
+  pdfLaTeX 方案，照旧 pdflatex。
+- **非 UTF-8 源不再被 Unicode 引擎吞下去**：GBK 文件交给 xelatex，之前会"编译成功"、
+  产出一份全是错字的 PDF —— 这比报错更糟，因为没人看得出坏了。现在 `compile_project`
+  在启动前扫项目里的 `.tex`，有非 UTF-8 就直接失败并给 `encoding` 诊断。pdfTeX 不做这个
+  检查：`\usepackage[latin1]{inputenc}` 是合法配置。
+- **`_classify` 认 `Invalid UTF-8 byte sequence`**：GBK 源在 pdfTeX 下报的是字节而不是字符，
+  文案与 Unicode 分支不同，以前落到 `generic`。
+- **`repair` 的编码建议分两种**：文件本身不是 UTF-8 时给 `iconv -f gb18030` 转换命令并停手
+  （自动转换要靠猜原始编码，猜错就是毁文件）；文件是 UTF-8 只是字符缺字形时才建议换引擎。
+
+### 验证
+
+- 单测 **44/44**（日志 11 + 引擎 15 + 版面 18）
+- 冒烟 **31/31**
+- P6 **25/25**（对 `git archive` 出来的包跑，不是对工作区）
+- 实测指标：hello 1.0s/1 页、zh 3.8s/1 页（xelatex）、bib 5.9s/1 页（biber）、
+  tikz 2.2s/1 页（xelatex）、big 1.6s/9 页；log 压缩比 10–144×；9/9 JSON 可解析；
+  修复闭环 2 轮收敛；不可修缺陷 1 轮停在 `needs-human`。
+
 ## v0.2.0 — 2026-11-21
 
 补上调研计划里的 P4（诊断闭环）与 P5（版面视觉量化）。`build-report.json` 契约不变。
@@ -49,6 +91,8 @@
 
 ### 修正
 
+- `init` 在「目标目录名恰好是模板名且没给 `--template`」时打一行提示：`latex-init zh`
+  会建一个叫 `zh` 的 **article** 项目，想用 zh 模板要写 `latex-init . --template zh`。
 - `repair` 的备份目录改为绝对路径解析（相对 `--outdir` 会落到调用者 cwd）。
 - `_split_furniture` 不再把「只剩一行正文」的页面吸成页眉：那更可能是真实空洞。
 

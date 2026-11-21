@@ -5,7 +5,7 @@ license: MIT
 compatibility: Windows（MSYS bash 调用），已在 TeX Live 2026 + Python 3.14 实测；Linux/macOS 上同样可用，只是路径与引擎探测分支不同。需要本机已装 TeX Live（含 latexmk、pdflatex、xelatex），可选 biber/bibtex/kpsewhich/pdftoppm/pdfinfo/chktex/latexindent。不联网、不自动安装任何 TeX 包。
 allowed-tools: Read Write Edit Bash Glob Grep
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
   last-reviewed: "2026-11-21"
   skill-author: built for DeepSeek Harness from the research in docs/01-research-report.md
   upstream: https://github.com/ccyk-hash/latex-automation
@@ -66,7 +66,9 @@ bash "$SKILL_DIR/bin/latex-build" path/to/project
 - **主文档**：在项目里评分挑主 `.tex`（`main.tex`/`paper.tex`/`thesis.tex` 优先，其次浅层、
   其次 `\documentclass` 所在）。挑错了就显式传 `--file other.tex`。
 - **引擎**：扫源码里的 `fontspec`/`ctex`/`xeCJK`/`unicode-math` → XeLaTeX；`luacode`/
-  `luatexja` → LuaLaTeX；否则 pdflatex。`--engine auto` 是默认值。
+  `luatexja` → LuaLaTeX；正文里有裸 CJK 字符（且没装 `CJK`/`CJKutf8` 这类 pdfLaTeX 方案）
+  → XeLaTeX；否则 pdflatex。`--engine auto` 是默认值。
+  注释里的中文不算——pdfTeX 根本不读注释，为它换引擎只会让输出莫名变样。
 - **后端**：`biblatex` + `backend=biber` → biber；`\bibliography{}` → bibtex。
 - **驱动**：默认走 `latexmk`（自动跑够轮数、自动处理 bib）。`--no-latexmk` 才直调引擎
   并按 `.aux` 指纹跑到稳定。
@@ -278,6 +280,19 @@ Windows TeX Live 有一个确定性缺陷：**绝对路径** `-output-directory`
 
 `build` 不会执行 `tlmgr install`，只打印命令。装不装、装什么是用户决定。
 
+### 6. 非 UTF-8 的 `.tex` 会被拒绝，而不是硬编
+
+GBK/GB18030 源交给 xelatex 会"编译成功"，产出一份全是错字的 PDF —— 这比报错更糟，因为
+没人看得出坏了。所以选 Unicode 引擎（xelatex/lualatex）时，`compile_project` **在启动前**
+扫项目里的 `.tex`，发现非 UTF-8 直接失败并给 `encoding` 诊断，`repair` 也不会去改那个文件，
+只告诉你先转码：
+
+```bash
+iconv -f gb18030 -t utf-8 'main.tex' > 'main.tex.utf8' && mv 'main.tex.utf8' 'main.tex'
+```
+
+pdfTeX 不做这个检查：`\usepackage[latin1]{inputenc}` 在 pdflatex 下是合法配置。
+
 ## 报告结构（`latex-out/build-report.json`）
 
 ```jsonc
@@ -323,8 +338,13 @@ Windows TeX Live 有一个确定性缺陷：**绝对路径** `-output-directory`
 
 ```bash
 bash "$SKILL_DIR/tests/smoke.sh"          # 31 个端到端用例，约 60 秒
-python -m unittest discover -s "$SKILL_DIR/tests"   # 46 个单测（日志解析 + 版面量化）
+python -m unittest discover -s "$SKILL_DIR/tests"   # 44 个单测（日志解析 + 引擎探测 + 版面量化）
+python "$SKILL_DIR/tests/verify_p6.py"    # 25 项打包验收，约 60 秒；发布前必跑
 ```
 
 冒烟套件里有两个**故意难看的目录名**（`带 空格 目录`、`中 文`）——它们就是 putenv 回归，
 任何改动后都必须仍然全绿。
+
+`verify_p6.py` 不跑工作区，它跑 `git archive HEAD` 出来的包，解到 `包 目录/relocated`
+（中文 + 空格）再验证。工作区能跑而包里跑不了，就是打包漏了文件或丢了可执行位。
+改代码时用 `--workspace` 迭代，发布前**不带参数**跑一遍。

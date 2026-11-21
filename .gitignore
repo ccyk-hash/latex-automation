@@ -31,3 +31,4 @@ Thumbs.db
 
 # Local scratch
 .work/
+tests/.p6/
